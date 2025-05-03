@@ -1,0 +1,64 @@
+server:
+  port: 8080
+  jetty:
+    threads:
+      max: 200
+      min: 8
+
+spring:
+  application:
+    name: xsync
+    version: 0.0.1
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/xsync?characterEncoding=utf8&useUnicode=true
+    username: root
+    password: "0000"
+    hikari:
+      auto-commit: true
+      maximum-pool-size: 32
+      minimum-idle: 8
+      connection-timeout: 30000
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 1
+      connect-timeout: 30000ms
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 8
+          max-wait: 30000ms
+
+  servlet:
+    multipart:
+      max-file-size: 4096MB
+      max-request-size: 4096MB
+      enabled: true
+
+mybatis-plus:
+  type-aliases-package: com.hhst.xsync.entity
+  mapper-locations: classpath:/mapper/**/*.xml
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: xsync
+
+logging:
+  level:
+    org:
+      springframework:
+        security=DEBUG:
+
+jwt:
+  secret: ed42c043-1c9c-4ae3-9316-3267449aabe4
+  expiration-ms: 3600000
+
+xsync:
+  speed-limiter:
+    rate: 0
