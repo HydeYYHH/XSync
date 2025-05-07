@@ -13,7 +13,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
   @Autowired private FileMapper mapper;
 
   @Override
-  public void upsert(File file) {
-    mapper.upsert(file);
+  public void upsert(File file, Integer delta) {
+    mapper.upsert(file, delta);
   }
 }

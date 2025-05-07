@@ -1,6 +1,7 @@
 package com.hhst.xsync.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hhst.xsync.entity.Chunk;
 import com.hhst.xsync.entity.Fc;
 import com.hhst.xsync.entity.File;
 import com.hhst.xsync.mapper.FcMapper;
@@ -32,17 +33,22 @@ public class FcServiceImpl extends ServiceImpl<FcMapper, Fc> implements IFcServi
    */
   @Transactional
   @Override
-  public Boolean upsertBatch(@NotNull List<Fc> fcs) {
+  public Boolean upsertBatch(@NotNull List<Fc> fcs, Long fileId) {
     if (fcs.isEmpty()) {
       return false;
     }
-    mapper.upsertBatch(fcs);
-    mapper.deleteInvalid(fcs.getFirst().getFileId());
+    mapper.upsertBatch(fcs, fileId);
+    mapper.deleteInvalid(fileId);
     return true;
   }
 
   @Override
   public List<String> getChunkHashes(File file) {
     return mapper.getChunkHashes(file);
+  }
+
+  @Override
+  public List<Chunk> getChunks(File file) {
+    return mapper.getChunks(file);
   }
 }

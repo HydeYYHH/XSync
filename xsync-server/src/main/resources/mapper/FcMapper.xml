@@ -5,7 +5,7 @@
     <insert id="upsertBatch">
         insert into fc(fileId, chunkHash, `index`) values
         <foreach collection="list" item="fc" separator=",">
-            (#{fc.fileId}, #{fc.chunkHash}, #{fc.index})
+            (#{fileId}, #{fc.chunkHash}, #{fc.index})
         </foreach>
         on duplicate key update chunkHash = values(chunkHash)
     </insert>

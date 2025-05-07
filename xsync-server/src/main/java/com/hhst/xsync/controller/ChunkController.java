@@ -1,26 +1,32 @@
 package com.hhst.xsync.controller;
 
 import com.hhst.xsync.dto.Response;
+import com.hhst.xsync.entity.Chunk;
+import com.hhst.xsync.entity.Fc;
+import com.hhst.xsync.entity.File;
+import com.hhst.xsync.entity.Metadata;
 import com.hhst.xsync.service.*;
+import com.hhst.xsync.utils.HashUtils;
+import com.hhst.xsync.utils.JwtUtils;
 import com.hhst.xsync.utils.RateLimitedOutputStream;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import java.io.*;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
-import java.util.Arrays;
-import java.util.List;
-import org.apache.commons.codec.binary.Hex;
-import org.apache.commons.codec.digest.DigestUtils;
+import java.util.*;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.coyote.BadRequestException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -31,70 +37,79 @@ public class ChunkController {
 
   private static final Log log = LogFactory.getLog(ChunkController.class);
 
-  @Value("${xsync.speed-limiter.rate}")
-  private double rate;
+  @Value("${xsync.speed-limiter.upload-batch.rate}")
+  private long uploadRate;
+
+  @Value("${xsync.speed-limiter.fetch-batch.rate}")
+  private long fetchRate;
 
   @Autowired private ObjectStorageService storageService;
+  @Autowired private IChunkService chunkService;
+  @Autowired private IFileService fileService;
+  @Autowired private IFcService fcService;
+  @Autowired private JwtUtils jwtUtils;
 
-  @PostMapping(value = "/upload", consumes = "multipart/form-data")
-  public Response upload(
-      @RequestParam("hash") @NotEmpty String hash,
-      @RequestParam("hash-algorithm") @NotEmpty String ha,
-      @RequestParam("file") @NotNull MultipartFile file) {
-    if (file.isEmpty()) {
-      return Response.build(HttpStatus.BAD_REQUEST, "File is empty");
-    }
-    // Process file upload in service layer
-    try {
-      byte[] data = file.getBytes();
-      // check file integrity
-      if (!Arrays.equals(DigestUtils.digest(DigestUtils.getDigest(ha), data), hash.getBytes())) {
-        return Response.build(HttpStatus.BAD_REQUEST, "File maybe broken");
-      }
-      // upload to object storage service
-      storageService.putObject(hash, data);
-    } catch (IllegalArgumentException e) {
-      log.error(e);
-      return Response.build(HttpStatus.BAD_REQUEST, e.getMessage());
-    } catch (Exception e) {
-      log.error(e);
-      return Response.build(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
-    }
-    return Response.build(HttpStatus.CREATED, "Chunk uploaded");
-  }
 
   /**
-   * Upload a batch-compressed file containing multiple chunks.
+   * Upload a file containing multiple chunks.
    *
-   * @param hash hash of the compressed file
    * @param ha hash algorithm
-   * @param file the compressed file
+   * @param meta metadata of file
+   * @param multipart of the file
    * @return response
    */
   @PostMapping(value = "/upload/batch", consumes = "multipart/form-data")
+  @Transactional
   public Response uploadBatch(
-      @RequestParam("hash") @NotEmpty String hash,
-      @RequestParam("hash-algorithm") @NotEmpty String ha,
-      @RequestParam("file") @NotNull MultipartFile file) {
+      @RequestPart("hash") @NotEmpty String hash,
+      @RequestPart("hash-algorithm") @NotEmpty String ha,
+      @RequestPart("metadata") @Valid Metadata meta,
+      @RequestPart("file") @NotNull MultipartFile multipart,
+      HttpServletRequest request) {
 
-    // Process batch upload in service layer
-    // format should be like: length|chunk
-    try (InputStream is = file.getInputStream();
+    String subject = jwtUtils.extractUserSubject(request).orElse(null);
+    if (subject == null) {
+      return Response.build(HttpStatus.UNAUTHORIZED, "Unauthorized request");
+    }
+
+    try (InputStream is = multipart.getInputStream();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        BufferedOutputStream buffer = new RateLimitedOutputStream(baos, rate)) {
-      MessageDigest digest = DigestUtils.getDigest(ha);
+        BufferedOutputStream buffer = new RateLimitedOutputStream(baos, uploadRate)) {
+
+      // Create Chunk entities
+      List<Chunk> chunks = new ArrayList<>();
+      // Create Fc entities
+      List<Fc> fcs = new ArrayList<>();
+
+      HashUtils.Hasher hasher = new HashUtils.Hasher("SHA-256");
 
       while (true) {
         try {
           byte[] lenBytes = IOUtils.readFully(is, 4); // read chunk length (int)
           int length = ByteBuffer.wrap(lenBytes).getInt();
-          byte[] chunk = IOUtils.readFully(is, length); // read actual chunk
+          byte[] chunk = IOUtils.readFully(is, length); // read chunk
 
-          // compute chunk hash and upload it
-          String chunkHash = Hex.encodeHexString(DigestUtils.digest(digest, chunk));
-          storageService.putObject(chunkHash, chunk);
+          // Compute chunk hash
+          String chunkHash = HashUtils.hash(chunk, ha);
+          // Update chunk hash for computing file hash
+          hasher.update(chunk);
+
           buffer.write(lenBytes);
           buffer.write(chunk);
+
+          chunks.add(new Chunk(chunkHash, chunk.length));
+          /*
+           * NOTE: the index is not the actual index in the file but the first occurrence place in the
+           * file, this field is used to delete the invalid chunk(delete if index greater than chunk
+           * count) but indicate the index of chunk.
+           */
+          int index = meta.getChunkHashes().indexOf(chunkHash);
+          if (index == -1) {
+            throw new BadRequestException("Invalid chunk: " + chunkHash);
+          }
+          fcs.add(new Fc(null, null, chunkHash, index));
+          // Upload it to minio server
+          storageService.putObject(chunkHash, chunk);
 
         } catch (EOFException e) {
           break;
@@ -103,33 +118,36 @@ public class ChunkController {
 
       buffer.flush();
 
-      // check file integrity
-      if (!Hex.encodeHexString(DigestUtils.digest(digest, baos.toByteArray())).equals(hash)) {
+      // Check file integrity
+      if (!hash.equals(hasher.getHash())) {
         return Response.build(HttpStatus.BAD_REQUEST, "File integrity check failed");
       }
+
+      // Upsert chunks in batch and get the file delta size
+      int delta = chunkService.upsertBatch(chunks);
+
+      // Create file entity
+      File file =
+          new File(
+              null,
+              meta.getFilepath(),
+              subject,
+              meta.getLastModifiedTime(),
+              meta.getChunkHashes().size(),
+              meta.getFilesize(), // use the post file size first
+              meta.getFileHash());
+      fileService.upsert(file, delta);
+
+      Boolean ignored = fcService.upsertBatch(fcs, file.getId());
+
       return Response.build(HttpStatus.CREATED, "Chunks uploaded");
 
     } catch (IllegalArgumentException e) {
-      log.error(e);
+      log.error("Invalid argument: ", e);
       return Response.build(HttpStatus.BAD_REQUEST, e.getMessage());
     } catch (Exception e) {
       log.error("Upload batch failed", e);
-      return Response.build(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
-    }
-  }
-
-  @GetMapping("/fetch/{hash}")
-  public ResponseEntity<byte[]> fetch(@PathVariable @NotEmpty String hash) {
-    byte[] chunks;
-    try {
-      chunks = storageService.getObject(hash);
-      return ResponseEntity.ok()
-          .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=chunks")
-          .contentType(MediaType.APPLICATION_OCTET_STREAM)
-          .body(chunks);
-    } catch (Exception e) {
-      log.error(e);
-      return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
+      return Response.build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
     }
   }
 
@@ -144,14 +162,16 @@ public class ChunkController {
       @RequestBody @NotEmpty List<String> hashes) {
     StreamingResponseBody body =
         outputStream -> {
-          try (BufferedOutputStream bos = new RateLimitedOutputStream(outputStream, rate)) {
+          try (BufferedOutputStream buffer = new RateLimitedOutputStream(outputStream, fetchRate)) {
+            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
             for (String hash : hashes) {
               byte[] chunk = storageService.getObject(hash);
               // write chunk length
-              bos.write(ByteBuffer.allocate(4).putInt(chunk.length).array());
+              lengthBuffer.clear();
+              buffer.write(lengthBuffer.putInt(chunk.length).array());
               // write chunk data
-              bos.write(chunk);
-              bos.flush();
+              buffer.write(chunk);
+              buffer.flush();
             }
           } catch (Exception e) {
             log.error("Failed to stream chunks", e);

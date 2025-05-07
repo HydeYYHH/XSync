@@ -1,56 +1,50 @@
 package com.hhst.xsync.config;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.hhst.xsync.entity.User;
-import com.hhst.xsync.service.IUserService;
 import com.hhst.xsync.utils.JwtUtils;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.List;
-import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.filter.GenericFilterBean;
 
 @Component
-public class JwtAuthenticationFilter extends OncePerRequestFilter {
+public class JwtAuthenticationFilter extends GenericFilterBean {
 
-  @Autowired private IUserService userService;
+  @Autowired private UserDetailsService userDetailsService;
   @Autowired private JwtUtils jwtUtils;
 
   @Override
-  protected void doFilterInternal(
-      @NotNull HttpServletRequest request,
-      @NotNull HttpServletResponse response,
-      @NotNull FilterChain filterChain)
-      throws ServletException, IOException {
-    String bearer = request.getHeader("Authorization");
+  public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+      throws IOException, ServletException {
+    String bearer = ((HttpServletRequest) request).getHeader("Authorization");
     if (bearer != null && bearer.startsWith("Bearer ")) {
       String token = bearer.substring(7);
       try {
         Claims claims = jwtUtils.parseToken(token);
         String email = jwtUtils.getSubject(claims);
-        if (!jwtUtils.isExpired(claims)
-            && email != null
-            && userService.exists(new QueryWrapper<>(User.class).eq("email", email))) {
-          UsernamePasswordAuthenticationToken auth =
-              new UsernamePasswordAuthenticationToken(
-                  email, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
-          SecurityContextHolder.getContext().setAuthentication(auth);
-        }
+        UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+        UsernamePasswordAuthenticationToken auth =
+            new UsernamePasswordAuthenticationToken(
+                userDetails, null, userDetails.getAuthorities());
+        SecurityContextHolder.getContext().setAuthentication(auth);
       } catch (Exception e) {
         logger.error(e.getMessage());
         SecurityContextHolder.clearContext();
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        ((HttpServletResponse) response)
+            .sendError(HttpServletResponse.SC_UNAUTHORIZED, e.getMessage());
+        return;
       }
     }
-    filterChain.doFilter(request, response);
+    chain.doFilter(request, response);
   }
 }

@@ -11,9 +11,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class Metadata {
   private String filepath;
-  private Long filesize;
+  private Integer filesize;
   private String fileHash;
   private Long lastModifiedTime;
-  private Long chunkCount;
+  private Integer chunkCount;
   private List<String> chunkHashes;
 }

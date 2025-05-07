@@ -32,7 +32,7 @@ public class UserController {
 
   @PostMapping("/register")
   public Response register(@NotNull String email, @NotNull String password) {
-    if (userService.save(new User(email, passwordEncoder.encode(password)))) {
+    if (userService.save(new User(email, passwordEncoder.encode(password), "ROLE_USER"))) {
       return Response.build(HttpStatus.OK, "Register successful", jwtUtils.generateToken(email));
     } else {
       return Response.build(HttpStatus.UNAUTHORIZED, "Register failed");

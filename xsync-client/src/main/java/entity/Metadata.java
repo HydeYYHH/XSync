@@ -1,6 +1,7 @@
 package entity;
 
 import java.util.List;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -11,6 +12,6 @@ public class Metadata {
   private Long filesize;
   private String fileHash;
   private Long lastModifiedTime;
-  private Long chunkCount;
+  private Integer chunkCount;
   private List<String> chunkHashes;
 }

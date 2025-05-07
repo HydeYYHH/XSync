@@ -6,7 +6,7 @@ import java.util.List;
 
 public interface IChunkService extends IService<Chunk> {
 
-  void upsert(Chunk chunk);
+  Integer upsert(Chunk chunk);
 
-  void upsertBatch(List<Chunk> chunks);
+  Integer upsertBatch(List<Chunk> chunks);
 }

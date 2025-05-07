@@ -1,24 +1,24 @@
 package service.impl;
 
-import com.google.common.collect.Lists;
+import entity.Chunk;
 import entity.Metadata;
 import entity.Response;
-import io.github.zabuzard.fastcdc4j.external.chunking.Chunk;
-import io.github.zabuzard.fastcdc4j.external.chunking.Chunker;
-import io.github.zabuzard.fastcdc4j.external.chunking.ChunkerBuilder;
-import io.github.zabuzard.fastcdc4j.external.chunking.ChunkerOption;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.net.URLEncoder;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.output.DeferredFileOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import service.SyncService;
+import utils.Const;
+import utils.HashUtils;
 
 /**
  * Implementation of SyncService for synchronizing files between local directories and remote
@@ -29,9 +29,9 @@ public class XSyncServiceImpl implements SyncService {
 
   private static final Log log = LogFactory.getLog(XSyncServiceImpl.class);
   private final XSyncRemoteService remoteService;
-  private int expectedChunkSize = 8 * 1024; // 8KB default
+  private int expectedChunkSize = Const.DEFAULT_EXPECTED_CHUNK_SIZE; // 8KB default
   private File rootDir = new File(".");
-  private File cacheDir = new File("./cache");
+  private File cacheDir = new File("./.cache");
 
   /** Initializes the remote service. */
   public XSyncServiceImpl() {
@@ -51,9 +51,11 @@ public class XSyncServiceImpl implements SyncService {
    * @return this instance for method chaining
    */
   @Override
-  public SyncService setCacheDir(File cacheDir) {
+  public SyncService setCacheDir(File cacheDir) throws IOException {
     this.cacheDir = cacheDir;
-    initDirs();
+    if (!cacheDir.exists()) {
+      FileUtils.forceMkdir(cacheDir);
+    }
     return this;
   }
 
@@ -64,9 +66,11 @@ public class XSyncServiceImpl implements SyncService {
    * @return this instance for method chaining
    */
   @Override
-  public SyncService setRootDir(File rootDir) {
+  public SyncService setRootDir(File rootDir) throws IOException {
     this.rootDir = rootDir;
-    initDirs();
+    if (!rootDir.exists()) {
+      FileUtils.forceMkdir(rootDir);
+    }
     return this;
   }
 
@@ -85,7 +89,6 @@ public class XSyncServiceImpl implements SyncService {
       String token = response.getBody().toString();
       FileUtils.writeStringToFile(new File(cacheDir, "credential"), token, StandardCharsets.UTF_8);
       remoteService.setToken(token);
-      remoteService.build();
     } else {
       throw new SyncException("Authentication failed", null);
     }
@@ -106,23 +109,7 @@ public class XSyncServiceImpl implements SyncService {
     }
     String token = FileUtils.readFileToString(credential, StandardCharsets.UTF_8);
     remoteService.setToken(token);
-    remoteService.build();
     return this;
-  }
-
-  /** Initializes cache and root directories with proper permissions. */
-  private void initDirs() {
-    try {
-      if (!cacheDir.exists()) {
-        FileUtils.forceMkdir(cacheDir);
-      }
-      if (!rootDir.exists()) {
-        FileUtils.forceMkdir(rootDir);
-      }
-    } catch (IOException e) {
-      log.error("Failed to initialize directories", e);
-      throw new SyncException("Directory initialization failed", e);
-    }
   }
 
   /**
@@ -136,38 +123,32 @@ public class XSyncServiceImpl implements SyncService {
   public Boolean sync(File file) {
     try {
       String filePath = validateFilePath(file);
+      log.info("Fetching metadata for " + filePath);
       Metadata remoteMeta =
-          remoteService
-              .fetchMetadata(URLEncoder.encode(filePath, StandardCharsets.UTF_8))
-              .orElse(null);
-      if (checkIfSyncNeeded(file, remoteMeta)) {
+          remoteService.fetchMetadata(URLEncoder.encode(filePath, StandardCharsets.UTF_8));
+      if (remoteMeta != null && checkIfSyncNeeded(file, remoteMeta)) {
         log.info("File already synchronized: " + file.getName());
         return true;
       }
-
       if (!file.exists()) {
         return downloadFile(file, remoteMeta);
       }
+      try (var is = FileUtils.openInputStream(file)) {
+        Iterable<Chunk> chunks =
+            new OptimizedChunker().setExpectedChunkSize(expectedChunkSize).chunk(is, file.length());
 
-      Chunker chunker =
-          new ChunkerBuilder()
-              .setHashMethod("SHA-256")
-              .setChunkerOption(ChunkerOption.FAST_CDC)
-              .setExpectedChunkSize(expectedChunkSize)
-              .build();
-      Iterable<Chunk> chunks = chunker.chunk(file.toPath());
+        Metadata localMeta = new Metadata();
 
-      Metadata localMeta = new Metadata();
-      localMeta.setFileHash(DigestUtils.sha256Hex(FileUtils.readFileToByteArray(file)));
-      localMeta.setFilepath(filePath);
-      localMeta.setLastModifiedTime(file.lastModified());
-      localMeta.setFilesize(file.length());
+        localMeta.setFilepath(filePath);
+        localMeta.setLastModifiedTime(file.lastModified());
+        localMeta.setFilesize(file.length());
 
-      if (remoteMeta == null
-          || localMeta.getLastModifiedTime() > remoteMeta.getLastModifiedTime()) {
-        return updateRemote(file, localMeta, chunks, remoteMeta);
-      } else {
-        return updateLocal(file, remoteMeta, chunks);
+        if (remoteMeta == null
+            || localMeta.getLastModifiedTime() > remoteMeta.getLastModifiedTime()) {
+          return updateRemote(file, localMeta, chunks, remoteMeta);
+        } else {
+          return updateLocal(file, remoteMeta, chunks, is);
+        }
       }
     } catch (IOException e) {
       log.error("Synchronization failed for file: " + file.getName(), e);
@@ -199,9 +180,6 @@ public class XSyncServiceImpl implements SyncService {
    * @return true if no sync is needed, false otherwise
    */
   private boolean checkIfSyncNeeded(File file, Metadata remoteMeta) {
-    if (remoteMeta == null) {
-      return false;
-    }
     Long localTime = file.lastModified();
     return localTime.equals(remoteMeta.getLastModifiedTime());
   }
@@ -218,26 +196,34 @@ public class XSyncServiceImpl implements SyncService {
       log.error("No remote metadata for file: " + file.getName());
       return false;
     }
-
-    var chunkIterator = remoteService.fetchChunks(remoteMeta.getChunkHashes()).orElse(null);
-    if (chunkIterator == null) {
-      log.warn("No chunks fetched for file: " + file.getName());
-      return false;
-    }
+    log.info("Downloading file: " + file.getName());
+    Iterable<Chunk> chunks = () -> remoteService.fetchChunks(remoteMeta.getChunkHashes());
 
     try {
+      File backup = new File(cacheDir, file.getName());
       if (file.exists()) {
-        FileUtils.forceDelete(file);
+        log.info("Backing up file: " + file.getName());
+        Files.move(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
       }
-      while (chunkIterator.hasNext()) {
-        Chunk chunk = chunkIterator.next();
+
+      log.info("Downloading file: " + file.getName());
+      for (Chunk chunk : chunks) {
         FileUtils.writeByteArrayToFile(file, chunk.getData(), true);
       }
-      String calculatedHash = DigestUtils.sha256Hex(FileUtils.readFileToByteArray(file));
-      if (!calculatedHash.equals(remoteMeta.getFileHash())) {
-        log.error("Hash mismatch for file: " + file.getName());
-        FileUtils.deleteQuietly(file);
-        return false;
+      try (var is = FileUtils.openInputStream(file)) {
+        String calculatedHash = Hex.encodeHexString(DigestUtils.sha256(is));
+        if (!calculatedHash.equals(remoteMeta.getFileHash())) {
+          log.error("Hash mismatch for file: " + file.getName());
+          log.error(
+              "Calculated hash: " + calculatedHash + ", remote hash: " + remoteMeta.getFileHash());
+          FileUtils.deleteQuietly(file);
+          if (backup.exists()) {
+            // restore backup
+            log.info("Restoring backup file: " + backup.getName());
+            Files.move(backup.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+          }
+          return false;
+        }
       }
       log.info("File downloaded: " + file.getName());
       return true;
@@ -257,52 +243,69 @@ public class XSyncServiceImpl implements SyncService {
    * @return true if upload succeeds, false otherwise
    */
   private boolean updateRemote(
-      File file, Metadata localMeta, Iterable<Chunk> chunks, Metadata remoteMeta) {
-    Set<String> existingChunks =
-        (remoteMeta != null && remoteMeta.getChunkHashes() != null)
-            ? new HashSet<>(remoteMeta.getChunkHashes())
-            : new HashSet<>();
+      File file, Metadata localMeta, Iterable<Chunk> chunks, Metadata remoteMeta)
+      throws IOException {
 
-    long chunkCount = 0;
-    long uploadedSize = 0;
+    // Initialize existing chunks from remote metadata, or use an empty set if none exist
+    Set<String> existingChunks =
+        (remoteMeta != null) ? new HashSet<>(remoteMeta.getChunkHashes()) : Collections.emptySet();
+
+    log.info("Updating remote file: " + file.getName());
+
+    int uploadedCount = 0;
+    int uploadedSize = 0;
+    File tmpFile = new File(cacheDir, file.getName() + ".tmp");
     List<String> chunkHashes = new ArrayList<>();
-    for (Chunk chunk : chunks) {
-      String hash = chunk.getHexHash();
-      if (!existingChunks.contains(hash)) {
-        Response uploadResponse = remoteService.uploadChunk(chunk);
-        if (!uploadResponse.isSuccess()) {
-          log.warn(
-              "Chunk upload failed for hash: "
-                  + hash
-                  + ", message: "
-                  + uploadResponse.getMessage());
+    try (DeferredFileOutputStream dfo =
+        DeferredFileOutputStream.builder()
+            .setOutputFile(tmpFile)
+            .setThreshold(Const.deferredStreamThreshold)
+            .get()) {
+      HashUtils.Hasher chunksHasher = new HashUtils.Hasher("SHA-256");
+      HashUtils.Hasher fileHasher = new HashUtils.Hasher("SHA-256");
+      ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
+      for (Chunk chunk : chunks) {
+        byte[] data = chunk.getData();
+        fileHasher.update(data);
+        String hash = HashUtils.hash(data, Const.hashAlgorithm);
+        chunkHashes.add(hash);
+        if (!existingChunks.contains(hash)) {
+          // Write chunk length and data only if the chunk doesn't exist remotely
+          chunksHasher.update(data);
+          lengthBuffer.clear();
+          lengthBuffer.putInt(chunk.length());
+          dfo.write(lengthBuffer.array());
+          dfo.write(chunk.getData());
+          uploadedCount++;
+          uploadedSize += chunk.length();
+          log.debug(String.format("Wrote chunk [%s], size=%d bytes", hash, chunk.length()));
+        } else {
+          log.debug(String.format("Skipped existing chunk [%s]", hash));
+        }
+      }
+      localMeta.setFileHash(fileHasher.getHash());
+      localMeta.setChunkHashes(chunkHashes);
+      localMeta.setChunkCount(chunkHashes.size());
+      // Chunks small enough
+      dfo.close();
+      try (InputStream is = dfo.toInputStream()) {
+        // Upload the input stream to the remote server
+        Response rep = remoteService.upload(is, localMeta, chunksHasher.getHash());
+        // Check if the upload was successful
+        if (!rep.isSuccess()) {
+          log.error("Failed to upload file " + file.getName() + ": " + rep.getMessage());
           return false;
         }
-        uploadedSize += chunk.getLength();
-        log.debug("Uploaded chunk: " + hash);
-      } else {
-        log.debug("Chunk exists on remote: " + hash);
       }
-      chunkHashes.add(hash);
-      chunkCount++;
-    }
-
-    Response finishResponse = remoteService.finishUploadChunk();
-    if (!finishResponse.isSuccess()) {
-      log.warn("Finish upload failed: " + finishResponse.getMessage());
+    } catch (IOException e) {
+      log.error("Failed to update remote file: " + file.getName(), e);
       return false;
     }
-
-    log.info("Uploaded chunks size: " + uploadedSize + " bytes");
-    localMeta.setChunkHashes(chunkHashes);
-    localMeta.setChunkCount(chunkCount);
-    Response metadataResponse = remoteService.uploadMetadata(localMeta);
-    if (!metadataResponse.isSuccess()) {
-      log.warn("Metadata upload failed: " + metadataResponse.getMessage());
-      return false;
-    }
-
-    log.info("File uploaded: " + file.getName());
+    // Log upload statistics
+    log.info(
+        String.format(
+            "Uploaded %d chunks (%d bytes) for file %s",
+            uploadedCount, uploadedSize, file.getName()));
     return true;
   }
 
@@ -314,11 +317,12 @@ public class XSyncServiceImpl implements SyncService {
    * @param chunks the local chunks
    * @return true if update succeeds, false otherwise
    */
-  private boolean updateLocal(File file, Metadata remoteMeta, Iterable<Chunk> chunks) {
+  private boolean updateLocal(
+      File file, Metadata remoteMeta, Iterable<Chunk> chunks, InputStream is) throws IOException {
     Set<String> remoteChunks = new HashSet<>(remoteMeta.getChunkHashes());
-
     for (Chunk chunk : chunks) {
-      String hash = chunk.getHexHash();
+      byte[] data = chunk.getData();
+      String hash = HashUtils.hash(data, Const.hashAlgorithm);
       if (remoteChunks.contains(hash)) {
         try {
           File chunkFile = new File(cacheDir, hash);
@@ -333,45 +337,47 @@ public class XSyncServiceImpl implements SyncService {
       }
     }
 
-    var chunkIterator = remoteService.fetchChunks(Lists.newArrayList(remoteChunks)).orElse(null);
-    if (chunkIterator == null && !remoteChunks.isEmpty()) {
-      log.warn("No chunks fetched for file: " + file.getName());
+    is.close();
+    log.info("Fetching chunks from server: " + remoteChunks);
+    if (remoteChunks.isEmpty()) {
+      log.warn("No chunks need to fetch for file: " + file.getName());
       return false;
     }
-
     long downloadedSize = 0L;
-
-    if (chunkIterator != null) {
-      while (chunkIterator.hasNext()) {
-        Chunk chunk = chunkIterator.next();
-        File chunkFile = new File(cacheDir, chunk.getHexHash());
-        downloadedSize += chunk.getLength();
-        try {
-          if (!chunkFile.exists()) {
-            FileUtils.writeByteArrayToFile(chunkFile, chunk.getData());
-          }
-        } catch (IOException e) {
-          log.error("Failed to cache chunk: " + chunk.getHexHash(), e);
-          return false;
-        }
-      }
+    var iterator = remoteService.fetchChunks(remoteChunks.stream().toList());
+    while (iterator.hasNext()) {
+      var chunk = iterator.next();
+      FileUtils.writeByteArrayToFile(
+          new File(cacheDir, HashUtils.hash(chunk.getData(), Const.hashAlgorithm)),
+          chunk.getData());
+      downloadedSize += chunk.length();
     }
     log.info("Downloaded chunks size: " + downloadedSize + " bytes");
     try {
+      log.info("Backing up file: " + file.getName());
       File backup = new File(cacheDir, file.getName());
-      Files.move(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
+      if (file.exists()) {
+        Files.move(file.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
+      }
+      log.info("Merging file: " + file.getName());
+      HashUtils.Hasher hasher = new HashUtils.Hasher("SHA-256");
       for (String hash : remoteMeta.getChunkHashes()) {
         File chunkFile = new File(cacheDir, hash);
         if (!chunkFile.exists()) {
           log.error("Missing chunk: " + hash);
           return false;
         }
-        FileUtils.writeByteArrayToFile(file, FileUtils.readFileToByteArray(chunkFile), true);
+        byte[] data = FileUtils.readFileToByteArray(chunkFile);
+        hasher.update(data);
+        FileUtils.writeByteArrayToFile(file, data, true);
       }
-      String calculatedHash = DigestUtils.sha256Hex(FileUtils.readFileToByteArray(file));
+      String calculatedHash = hasher.getHash();
       if (!calculatedHash.equals(remoteMeta.getFileHash())) {
         log.error("Hash mismatch for file: " + file.getName());
-        Files.move(backup.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        if (backup.exists()) {
+          log.info("Restoring file from backup: " + file.getName());
+          Files.move(backup.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
         return false;
       }
       if (!file.setLastModified(remoteMeta.getLastModifiedTime())) {

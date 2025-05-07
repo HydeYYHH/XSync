@@ -7,9 +7,9 @@ public interface SyncService {
 
   SyncService setExpectedChunkSize(int chunkSize);
 
-  SyncService setCacheDir(File cacheDir);
+  SyncService setCacheDir(File cacheDir) throws IOException;
 
-  SyncService setRootDir(File rootDir);
+  SyncService setRootDir(File rootDir) throws IOException;
 
   SyncService authenticate(String username, String password) throws IOException;
 

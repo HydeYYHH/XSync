@@ -1,27 +1,30 @@
 package com.hhst.xsync.utils;
 
-import com.google.common.util.concurrent.RateLimiter;
+import io.github.bucket4j.Bucket;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.time.Duration;
 import org.jetbrains.annotations.NotNull;
 
-@SuppressWarnings("UnstableApiUsage")
 public class RateLimitedOutputStream extends BufferedOutputStream {
 
   private final Boolean enabled;
-  private final RateLimiter limiter;
+  private final Bucket limiter;
 
   /**
    * Constructor.
    *
    * @param rate bytes per second.
    */
-  public RateLimitedOutputStream(OutputStream os, double rate) {
+  public RateLimitedOutputStream(OutputStream os, long rate) {
     super(os);
     if (rate > 0) {
       enabled = true;
-      limiter = RateLimiter.create(rate);
+      limiter =
+          Bucket.builder()
+              .addLimit(limit -> limit.capacity(rate).refillIntervally(rate, Duration.ofSeconds(1)))
+              .build();
     } else {
       enabled = false;
       limiter = null;
@@ -36,7 +39,12 @@ public class RateLimitedOutputStream extends BufferedOutputStream {
   @Override
   public void write(@NotNull byte[] b) throws IOException {
     if (enabled) {
-      limiter.acquire(b.length);
+      try {
+        limiter.asBlocking().consume(b.length);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Rate limiter was interrupted", e);
+      }
     }
     super.write(b);
   }
@@ -44,7 +52,12 @@ public class RateLimitedOutputStream extends BufferedOutputStream {
   @Override
   public synchronized void write(int b) throws IOException {
     if (enabled) {
-      limiter.acquire(1);
+      try {
+        limiter.asBlocking().consume(1);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Rate limiter was interrupted", e);
+      }
     }
     super.write(b);
   }
@@ -52,7 +65,12 @@ public class RateLimitedOutputStream extends BufferedOutputStream {
   @Override
   public synchronized void write(@NotNull byte[] b, int off, int len) throws IOException {
     if (enabled) {
-      limiter.acquire(len);
+      try {
+        limiter.asBlocking().consume(len);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Rate limiter was interrupted", e);
+      }
     }
     super.write(b, off, len);
   }

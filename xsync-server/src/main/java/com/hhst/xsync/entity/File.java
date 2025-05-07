@@ -4,13 +4,11 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+
 import java.io.Serial;
 import java.io.Serializable;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.*;
 
 /**
  * <p>
@@ -18,13 +16,14 @@ import lombok.ToString;
  * </p>
  *
  * @author hhst
- * @since 2025-05-02
+ * @since 2025-05-05
  */
 @Getter
 @Setter
 @ToString
 @TableName("file")
 @AllArgsConstructor
+@NoArgsConstructor
 public class File implements Serializable {
 
     @Serial
@@ -33,9 +32,15 @@ public class File implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
+    /**
+     * filepath for given user
+     */
     @TableField("filepath")
     private String filepath;
 
+    /**
+     * user email
+     */
     @TableField("email")
     private String email;
 
@@ -49,13 +54,13 @@ public class File implements Serializable {
      * number of chunks
      */
     @TableField("chunkCount")
-    private Long chunkCount;
+    private Integer chunkCount;
 
     /**
      * file size(byte)
      */
     @TableField("size")
-    private Long size;
+    private Integer size;
 
     /**
      * file hash hex string

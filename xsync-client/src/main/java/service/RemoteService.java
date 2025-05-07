@@ -1,11 +1,12 @@
 package service;
 
+import entity.Chunk;
 import entity.Metadata;
 import entity.Response;
-import io.github.zabuzard.fastcdc4j.external.chunking.Chunk;
+
+import java.io.InputStream;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * RemoteService defines operations to communicate with the remote server for uploading and fetching
@@ -18,20 +19,11 @@ public interface RemoteService {
   Response login(String username, String password);
 
   /**
-   * Upload a chunk to the server.
+   * Upload chunk and metadata to the server.
    *
-   * @param chunk the chunk to be uploaded
    * @return server response indicating success or failure
    */
-  Response uploadChunk(Chunk chunk);
-
-  /**
-   * Fetch the metadata of a file from the server.
-   *
-   * @param fileReference the file reference
-   * @return metadata object retrieved from the server
-   */
-  Optional<Metadata> fetchMetadata(String fileReference);
+  Response upload(InputStream stream, Metadata metadata, String hash);
 
   /**
    * Fetch a list of chunks from the server using their hash values.
@@ -39,13 +31,14 @@ public interface RemoteService {
    * @param chunkHashes list of chunk hashes
    * @return list of Chunk objects corresponding to the given hashes
    */
-  Optional<Iterator<Chunk>> fetchChunks(List<String> chunkHashes);
+  Iterator<Chunk> fetchChunks(List<String> chunkHashes);
 
   /**
-   * Upload metadata to the server.
+   * Fetch the metadata of a file from the server.
    *
-   * @param metadata metadata object representing file information
-   * @return server response indicating success or failure
+   * @param path the file reference path
+   * @return metadata object retrieved from the server
    */
-  Response uploadMetadata(Metadata metadata);
+  Metadata fetchMetadata(String path);
+
 }

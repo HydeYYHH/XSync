@@ -6,46 +6,38 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.io.Serial;
 import java.io.Serializable;
-
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
-import org.checkerframework.checker.units.qual.A;
+import lombok.*;
 
 /**
- * <p>
  * the middle table between chunk and file
- * </p>
  *
  * @author hhst
- * @since 2025-05-02
+ * @since 2025-05-05
  */
 @Getter
 @Setter
 @ToString
 @TableName("fc")
 @AllArgsConstructor
+@NoArgsConstructor
 public class Fc implements Serializable {
 
-    @Serial
-    private static final long serialVersionUID = 1L;
+  @Serial private static final long serialVersionUID = 1L;
 
-    @TableId(value = "id", type = IdType.AUTO)
-    private Long id;
+  @TableId(value = "id", type = IdType.AUTO)
+  private Long id;
 
-    @TableField("fileId")
-    private Long fileId;
+  @TableField("fileId")
+  private Long fileId;
 
-    /**
-     * chunk hash
-     */
-    @TableField("chunkHash")
-    private String chunkHash;
+  /** chunk hash */
+  @TableField("chunkHash")
+  private String chunkHash;
 
-    /**
-     * index of the chunk in the file
-     */
-    @TableField("index")
-    private Long index;
+  /**
+   * The chunk's index in the file reflects its first occurrence, rather than its actual position in
+   * the sequence
+   */
+  @TableField("index")
+  private Integer index;
 }

@@ -4,12 +4,14 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.Optional;
 
 @Component
 public class JwtUtils {
@@ -48,4 +50,15 @@ public class JwtUtils {
   public String getSubject(Claims claims) {
     return claims.getSubject();
   }
+
+  public Optional<String> extractUserSubject(HttpServletRequest request) {
+    String bearer = request.getHeader("Authorization");
+    if (bearer == null || !bearer.startsWith("Bearer ")) {
+      return Optional.empty();
+    }
+    String token = bearer.substring(7);
+    Claims claims = parseToken(token);
+    return Optional.of(claims.getSubject());
+  }
+
 }

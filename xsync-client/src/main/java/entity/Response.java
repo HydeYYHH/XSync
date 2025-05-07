@@ -11,6 +11,6 @@ public class Response {
   private Object body;
 
   public Boolean isSuccess() {
-    return code >= 200 && code < 300;
+    return code != null && code >= 200 && code < 300;
   }
 }

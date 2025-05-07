@@ -49,16 +49,13 @@ minio:
   secret-key: minioadmin
   bucket: xsync
 
-logging:
-  level:
-    org:
-      springframework:
-        security=DEBUG:
-
 jwt:
   secret: ed42c043-1c9c-4ae3-9316-3267449aabe4
   expiration-ms: 3600000
 
 xsync:
   speed-limiter:
-    rate: 0
+    upload-batch:
+      rate: 0
+    fetch-batch:
+      rate: 0
