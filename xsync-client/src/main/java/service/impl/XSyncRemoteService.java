@@ -145,7 +145,7 @@ public class XSyncRemoteService implements RemoteService {
         byte[] chunkData = new byte[chunkLength];
         inputStream.readFully(chunkData);
 
-        Chunk chunk = new Chunk(chunkData);
+        Chunk chunk = new Chunk(chunkData, chunkLength);
         currentChunk++;
         return chunk;
       } catch (IOException e) {

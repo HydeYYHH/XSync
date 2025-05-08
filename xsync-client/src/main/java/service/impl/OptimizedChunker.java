@@ -84,7 +84,7 @@ public class OptimizedChunker {
 
       final byte[] data = core.readNextChunk(stream, size, currentOffset);
 
-      final Chunk chunk = new Chunk(data);
+      final Chunk chunk = new Chunk(data, data.length);
 
       currentOffset += data.length;
       return chunk;

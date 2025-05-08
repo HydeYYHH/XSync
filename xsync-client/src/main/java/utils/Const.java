@@ -6,7 +6,7 @@ public class Const {
     public static final String defaultUrl = "http://localhost:8080";
 
     // Hash
-    public static final String hashAlgorithm = "Blake3";
+    public static final String hashAlgorithm = "SHA-256";
 
     // FastCDC
     public static final int DEFAULT_EXPECTED_CHUNK_SIZE = 8 * 1_024;
@@ -16,7 +16,7 @@ public class Const {
     public static final long DEFAULT_MASK_GENERATION_SEED = 941_568_351L;
 
     // Stream
-    public static final Integer deferredStreamThreshold = 1024 * 1024; // 1MB
+    public static final Integer deferredStreamThreshold = 4 * 1024 * 1024;
 
 
 }

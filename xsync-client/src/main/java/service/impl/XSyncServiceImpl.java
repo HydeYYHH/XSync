@@ -133,9 +133,12 @@ public class XSyncServiceImpl implements SyncService {
       if (!file.exists()) {
         return downloadFile(file, remoteMeta);
       }
-      try (var is = FileUtils.openInputStream(file)) {
+      try (var is = FileUtils.openInputStream(file);
+          var bis = new BufferedInputStream(is)) {
         Iterable<Chunk> chunks =
-            new OptimizedChunker().setExpectedChunkSize(expectedChunkSize).chunk(is, file.length());
+            new OptimizedChunker()
+                .setExpectedChunkSize(expectedChunkSize)
+                .chunk(bis, file.length());
 
         Metadata localMeta = new Metadata();
 
@@ -147,7 +150,7 @@ public class XSyncServiceImpl implements SyncService {
             || localMeta.getLastModifiedTime() > remoteMeta.getLastModifiedTime()) {
           return updateRemote(file, localMeta, chunks, remoteMeta);
         } else {
-          return updateLocal(file, remoteMeta, chunks, is);
+          return updateLocal(file, remoteMeta, chunks, bis);
         }
       }
     } catch (IOException e) {
@@ -273,12 +276,12 @@ public class XSyncServiceImpl implements SyncService {
           // Write chunk length and data only if the chunk doesn't exist remotely
           chunksHasher.update(data);
           lengthBuffer.clear();
-          lengthBuffer.putInt(chunk.length());
+          lengthBuffer.putInt(chunk.getLength());
           dfo.write(lengthBuffer.array());
           dfo.write(chunk.getData());
           uploadedCount++;
-          uploadedSize += chunk.length();
-          log.debug(String.format("Wrote chunk [%s], size=%d bytes", hash, chunk.length()));
+          uploadedSize += chunk.getLength();
+          log.debug(String.format("Wrote chunk [%s], size=%d bytes", hash, chunk.getLength()));
         } else {
           log.debug(String.format("Skipped existing chunk [%s]", hash));
         }
@@ -350,7 +353,7 @@ public class XSyncServiceImpl implements SyncService {
       FileUtils.writeByteArrayToFile(
           new File(cacheDir, HashUtils.hash(chunk.getData(), Const.hashAlgorithm)),
           chunk.getData());
-      downloadedSize += chunk.length();
+      downloadedSize += chunk.getLength();
     }
     log.info("Downloaded chunks size: " + downloadedSize + " bytes");
     try {

@@ -7,9 +7,5 @@ import lombok.Data;
 @AllArgsConstructor
 public class Chunk {
   private final byte[] data;
-
-  public Integer length() {
-    return data.length;
-  }
-
+  private final int length;
 }
