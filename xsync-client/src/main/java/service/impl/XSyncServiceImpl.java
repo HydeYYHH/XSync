@@ -10,10 +10,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+
+import io.github.zabuzard.fastcdc4j.internal.util.Validations;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.output.DeferredFileOutputStream;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import service.SyncService;
@@ -52,6 +55,7 @@ public class XSyncServiceImpl implements SyncService {
    */
   @Override
   public SyncService setCacheDir(File cacheDir) throws IOException {
+    Objects.requireNonNull(cacheDir, "cacheDir");
     this.cacheDir = cacheDir;
     if (!cacheDir.exists()) {
       FileUtils.forceMkdir(cacheDir);
@@ -67,6 +71,7 @@ public class XSyncServiceImpl implements SyncService {
    */
   @Override
   public SyncService setRootDir(File rootDir) throws IOException {
+    Objects.requireNonNull(rootDir, "rootDir");
     this.rootDir = rootDir;
     if (!rootDir.exists()) {
       FileUtils.forceMkdir(rootDir);
@@ -84,6 +89,8 @@ public class XSyncServiceImpl implements SyncService {
    */
   @Override
   public SyncService authenticate(String username, String password) throws IOException {
+    Validations.require(StringUtils.isNotEmpty(username), "username");
+    Validations.require(StringUtils.isNotEmpty(password), "password");
     Response response = remoteService.login(username, password);
     if (response != null && response.isSuccess()) {
       String token = response.getBody().toString();
@@ -122,6 +129,7 @@ public class XSyncServiceImpl implements SyncService {
   @Override
   public Boolean sync(File file) {
     try {
+      Objects.requireNonNull(file, "file");
       String filePath = validateFilePath(file);
       log.info("Fetching metadata for " + filePath);
       Metadata remoteMeta =
@@ -134,7 +142,7 @@ public class XSyncServiceImpl implements SyncService {
         return downloadFile(file, remoteMeta);
       }
       try (var is = FileUtils.openInputStream(file);
-          var bis = new BufferedInputStream(is)) {
+          var bis = new BufferedInputStream(is, Const.bufferSize)) {
         Iterable<Chunk> chunks =
             new OptimizedChunker()
                 .setExpectedChunkSize(expectedChunkSize)
@@ -150,7 +158,7 @@ public class XSyncServiceImpl implements SyncService {
             || localMeta.getLastModifiedTime() > remoteMeta.getLastModifiedTime()) {
           return updateRemote(file, localMeta, chunks, remoteMeta);
         } else {
-          return updateLocal(file, remoteMeta, chunks, bis);
+          return updateLocal(file, remoteMeta, chunks);
         }
       }
     } catch (IOException e) {
@@ -167,6 +175,7 @@ public class XSyncServiceImpl implements SyncService {
    * @throws IOException if the path is invalid
    */
   private String validateFilePath(File file) throws IOException {
+    Objects.requireNonNull(file, "file");
     String root = rootDir.getCanonicalPath();
     String target = file.getCanonicalPath();
     if (!target.startsWith(root)) {
@@ -183,6 +192,8 @@ public class XSyncServiceImpl implements SyncService {
    * @return true if no sync is needed, false otherwise
    */
   private boolean checkIfSyncNeeded(File file, Metadata remoteMeta) {
+    Objects.requireNonNull(file, "file");
+    Objects.requireNonNull(remoteMeta, "remoteMeta");
     Long localTime = file.lastModified();
     return localTime.equals(remoteMeta.getLastModifiedTime());
   }
@@ -195,6 +206,7 @@ public class XSyncServiceImpl implements SyncService {
    * @return true if download succeeds, false otherwise
    */
   private boolean downloadFile(File file, Metadata remoteMeta) {
+    Objects.requireNonNull(file, "file");
     if (remoteMeta == null) {
       log.error("No remote metadata for file: " + file.getName());
       return false;
@@ -248,7 +260,9 @@ public class XSyncServiceImpl implements SyncService {
   private boolean updateRemote(
       File file, Metadata localMeta, Iterable<Chunk> chunks, Metadata remoteMeta)
       throws IOException {
-
+    Objects.requireNonNull(file, "file");
+    Objects.requireNonNull(localMeta, "localMeta");
+    Objects.requireNonNull(chunks, "chunks");
     // Initialize existing chunks from remote metadata, or use an empty set if none exist
     Set<String> existingChunks =
         (remoteMeta != null) ? new HashSet<>(remoteMeta.getChunkHashes()) : Collections.emptySet();
@@ -321,7 +335,10 @@ public class XSyncServiceImpl implements SyncService {
    * @return true if update succeeds, false otherwise
    */
   private boolean updateLocal(
-      File file, Metadata remoteMeta, Iterable<Chunk> chunks, InputStream is) throws IOException {
+      File file, Metadata remoteMeta, Iterable<Chunk> chunks) throws IOException {
+    Objects.requireNonNull(file, "file");
+    Objects.requireNonNull(remoteMeta, "remoteMeta");
+    Objects.requireNonNull(chunks, "chunks");
     Set<String> remoteChunks = new HashSet<>(remoteMeta.getChunkHashes());
     for (Chunk chunk : chunks) {
       byte[] data = chunk.getData();
@@ -340,7 +357,6 @@ public class XSyncServiceImpl implements SyncService {
       }
     }
 
-    is.close();
     log.info("Fetching chunks from server: " + remoteChunks);
     if (remoteChunks.isEmpty()) {
       log.warn("No chunks need to fetch for file: " + file.getName());

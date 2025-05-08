@@ -7,7 +7,10 @@ import io.github.zabuzard.fastcdc4j.internal.chunking.FastCdcChunkerCore;
 import io.github.zabuzard.fastcdc4j.internal.chunking.HashTables;
 import io.github.zabuzard.fastcdc4j.internal.chunking.MaskGenerator;
 import io.github.zabuzard.fastcdc4j.internal.util.Validations;
+import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -21,6 +24,7 @@ public class OptimizedChunker {
     Objects.requireNonNull(expectedChunkSize);
     Objects.requireNonNull(stream);
     Validations.requirePositiveNonZero(size, "Size");
+    Validations.require(stream instanceof BufferedInputStream, "BufferedInputStream");
     return () -> new ChunkerIterator(stream, size, expectedChunkSize);
   }
 
@@ -72,7 +76,16 @@ public class OptimizedChunker {
 
     @Override
     public boolean hasNext() {
-      return currentOffset < size;
+      if (currentOffset < size) {
+        return true;
+      } else {
+        try {
+          stream.close();
+        } catch (IOException e) {
+          throw new UncheckedIOException("Error closing stream", e);
+        }
+        return false;
+      }
     }
 
     @Override

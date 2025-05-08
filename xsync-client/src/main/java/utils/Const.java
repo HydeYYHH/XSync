@@ -17,6 +17,6 @@ public class Const {
 
     // Stream
     public static final Integer deferredStreamThreshold = 4 * 1024 * 1024;
-
+    public static final Integer bufferSize = 64 * 1024;
 
 }

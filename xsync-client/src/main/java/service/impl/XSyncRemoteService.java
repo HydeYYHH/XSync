@@ -4,17 +4,17 @@ import com.google.gson.Gson;
 import entity.Chunk;
 import entity.Metadata;
 import entity.Response;
+import io.github.zabuzard.fastcdc4j.internal.util.Validations;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Iterator;
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.Optional;
+import java.util.*;
 import kong.unirest.core.ContentType;
 import kong.unirest.core.RawResponse;
 import kong.unirest.core.Unirest;
 import kong.unirest.core.UnirestException;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import service.RemoteService;
@@ -31,11 +31,14 @@ public class XSyncRemoteService implements RemoteService {
 
   @Override
   public void setToken(String token) {
+    Validations.require(StringUtils.isNotEmpty(token), "token cannot be empty");
     Unirest.config().setDefaultHeader("Authorization", "Bearer " + token);
   }
 
   @Override
   public Response login(String username, String password) {
+    Validations.require(StringUtils.isNotEmpty(username), "username cannot be empty");
+    Validations.require(StringUtils.isNotEmpty(password), "password cannot be empty");
     return Unirest.post("/user/login")
         .field("email", username)
         .field("password", password)
@@ -49,6 +52,9 @@ public class XSyncRemoteService implements RemoteService {
 
   @Override
   public Response upload(InputStream stream, Metadata metadata, String hash) {
+    Objects.requireNonNull(stream, "stream cannot be null");
+    Objects.requireNonNull(metadata, "metadata cannot be null");
+    Validations.require(StringUtils.isNotEmpty(hash), "hash cannot be empty");
     return Unirest.post("/chunk/upload/batch")
         .field("hash", hash, ContentType.TEXT_PLAIN.getMimeType())
         .field("hash-algorithm", Const.hashAlgorithm, ContentType.TEXT_PLAIN.getMimeType())
@@ -64,6 +70,7 @@ public class XSyncRemoteService implements RemoteService {
 
   @Override
   public Iterator<Chunk> fetchChunks(List<String> chunkHashes) {
+    Validations.require(CollectionUtils.isNotEmpty(chunkHashes), "chunkHashes cannot be empty");
     var stream =
         Unirest.post("/chunk/fetch/batch")
             .header("Content-Type", ContentType.APPLICATION_JSON.getMimeType())
@@ -79,6 +86,7 @@ public class XSyncRemoteService implements RemoteService {
 
   @Override
   public Metadata fetchMetadata(String path) {
+    Validations.require(StringUtils.isNotEmpty(path), "path cannot be empty");
     var rep =
         Unirest.get("/metadata/fetch")
             .queryString("path", path)
@@ -110,6 +118,8 @@ public class XSyncRemoteService implements RemoteService {
      * @param totalChunks the expected number of chunks
      */
     public ChunkIterator(InputStream inputStream, int totalChunks) {
+      Objects.requireNonNull(inputStream, "inputStream cannot be null");
+      Validations.requirePositive(totalChunks, "totalChunks");
       this.inputStream = new DataInputStream(inputStream);
       this.totalChunks = totalChunks;
     }
