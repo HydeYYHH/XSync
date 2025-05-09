@@ -9,4 +9,7 @@ public interface IChunkService extends IService<Chunk> {
   Integer upsert(Chunk chunk);
 
   Integer upsertBatch(List<Chunk> chunks);
+
+  List<Chunk> getIsolatedChunks();
+
 }

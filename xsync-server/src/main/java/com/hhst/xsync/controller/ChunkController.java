@@ -8,7 +8,7 @@ import com.hhst.xsync.entity.Metadata;
 import com.hhst.xsync.service.*;
 import com.hhst.xsync.utils.HashUtils;
 import com.hhst.xsync.utils.JwtUtils;
-import com.hhst.xsync.utils.RateLimitedOutputStream;
+import com.hhst.xsync.utils.RateLimiter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
@@ -16,6 +16,7 @@ import jakarta.validation.constraints.NotNull;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -49,7 +50,6 @@ public class ChunkController {
   @Autowired private IFcService fcService;
   @Autowired private JwtUtils jwtUtils;
 
-
   /**
    * Upload a file containing multiple chunks.
    *
@@ -72,10 +72,8 @@ public class ChunkController {
       return Response.build(HttpStatus.UNAUTHORIZED, "Unauthorized request");
     }
 
-    try (InputStream is = multipart.getInputStream();
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        BufferedOutputStream buffer = new RateLimitedOutputStream(baos, uploadRate)) {
-
+    try (InputStream is = multipart.getInputStream()) {
+      RateLimiter limiter = RateLimiter.newInstance(uploadRate);
       // Create Chunk entities
       List<Chunk> chunks = new ArrayList<>();
       // Create Fc entities
@@ -83,19 +81,21 @@ public class ChunkController {
 
       HashUtils.Hasher hasher = new HashUtils.Hasher("SHA-256");
 
+      List<CompletableFuture<Void>> futures = new ArrayList<>();
+
       while (true) {
         try {
           byte[] lenBytes = IOUtils.readFully(is, 4); // read chunk length (int)
           int length = ByteBuffer.wrap(lenBytes).getInt();
           byte[] chunk = IOUtils.readFully(is, length); // read chunk
 
+          // Rate limiting
+          limiter.limiting(length);
+
           // Compute chunk hash
           String chunkHash = HashUtils.hash(chunk, ha);
           // Update chunk hash for computing file hash
           hasher.update(chunk);
-
-          buffer.write(lenBytes);
-          buffer.write(chunk);
 
           chunks.add(new Chunk(chunkHash, chunk.length));
           /*
@@ -109,20 +109,22 @@ public class ChunkController {
           }
           fcs.add(new Fc(null, null, chunkHash, index));
           // Upload it to minio server
-          storageService.putObject(chunkHash, chunk);
+          futures.add(storageService.putObject(chunkHash, chunk));
 
         } catch (EOFException e) {
           break;
+        } catch (RuntimeException e) {
+          return Response.build(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
         }
       }
-
-      buffer.flush();
 
       // Check file integrity
       if (!hash.equals(hasher.getHash())) {
         return Response.build(HttpStatus.BAD_REQUEST, "File integrity check failed");
       }
 
+      // Wait all storage service tasks completed
+      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
       // Upsert chunks in batch and get the file delta size
       int delta = chunkService.upsertBatch(chunks);
 
@@ -162,10 +164,15 @@ public class ChunkController {
       @RequestBody @NotEmpty List<String> hashes) {
     StreamingResponseBody body =
         outputStream -> {
-          try (BufferedOutputStream buffer = new RateLimitedOutputStream(outputStream, fetchRate)) {
-            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
+          try (BufferedOutputStream buffer =
+              RateLimiter.newInstance(fetchRate).stream(outputStream)) {
+            List<CompletableFuture<byte[]>> futures = new ArrayList<>();
             for (String hash : hashes) {
-              byte[] chunk = storageService.getObject(hash);
+              futures.add(storageService.getObject(hash));
+            }
+            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
+            for (var future : futures) {
+              byte[] chunk = future.get();
               // write chunk length
               lengthBuffer.clear();
               buffer.write(lengthBuffer.putInt(chunk.length).array());

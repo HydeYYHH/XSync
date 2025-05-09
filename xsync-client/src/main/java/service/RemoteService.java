@@ -3,7 +3,6 @@ package service;
 import entity.Chunk;
 import entity.Metadata;
 import entity.Response;
-
 import java.io.InputStream;
 import java.util.Iterator;
 import java.util.List;
@@ -41,4 +40,10 @@ public interface RemoteService {
    */
   Metadata fetchMetadata(String path);
 
+  /**
+   * Delete the file from server.
+   * @param path the filepath of the file.
+   * @return server response indicating success or failure
+   */
+  Response delete(String path);
 }

@@ -3,6 +3,7 @@ package service.impl;
 import entity.Chunk;
 import entity.Metadata;
 import entity.Response;
+import io.github.zabuzard.fastcdc4j.internal.util.Validations;
 import java.io.*;
 import java.net.URLEncoder;
 import java.nio.ByteBuffer;
@@ -10,8 +11,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
-
-import io.github.zabuzard.fastcdc4j.internal.util.Validations;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
@@ -163,6 +162,24 @@ public class XSyncServiceImpl implements SyncService {
       }
     } catch (IOException e) {
       log.error("Synchronization failed for file: " + file.getName(), e);
+      return false;
+    }
+  }
+
+  @Override
+  public Boolean delete(File file) {
+    Objects.requireNonNull(file, "file");
+    try {
+      String filePath = validateFilePath(file);
+      log.info("Deleting for " + filePath);
+      var rep = remoteService.delete(URLEncoder.encode(filePath, StandardCharsets.UTF_8));
+      log.info(
+          String.format(
+              "Response from server: (statusCode: %d, message: \"%s\")",
+              rep.getCode(), rep.getMessage()));
+      return rep.isSuccess();
+    } catch (IOException e) {
+      log.error("Delete file failed: " + file.getName(), e);
       return false;
     }
   }
@@ -334,8 +351,8 @@ public class XSyncServiceImpl implements SyncService {
    * @param chunks the local chunks
    * @return true if update succeeds, false otherwise
    */
-  private boolean updateLocal(
-      File file, Metadata remoteMeta, Iterable<Chunk> chunks) throws IOException {
+  private boolean updateLocal(File file, Metadata remoteMeta, Iterable<Chunk> chunks)
+      throws IOException {
     Objects.requireNonNull(file, "file");
     Objects.requireNonNull(remoteMeta, "remoteMeta");
     Objects.requireNonNull(chunks, "chunks");

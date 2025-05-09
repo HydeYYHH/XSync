@@ -47,4 +47,9 @@ public class ChunkServiceImpl extends ServiceImpl<ChunkMapper, Chunk> implements
 
     return totalDelta;
   }
+
+  @Override
+  public List<Chunk> getIsolatedChunks() {
+    return mapper.getIsolatedChunks();
+  }
 }

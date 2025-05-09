@@ -39,6 +39,11 @@ spring:
       max-request-size: 4096MB
       enabled: true
 
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1024,expireAfterWrite=30m
+
 mybatis-plus:
   type-aliases-package: com.hhst.xsync.entity
   mapper-locations: classpath:/mapper/**/*.xml
@@ -59,3 +64,6 @@ xsync:
       rate: 0
     fetch-batch:
       rate: 0
+
+  chunks-cleaner:
+    rate: 3600000 # 1 hour

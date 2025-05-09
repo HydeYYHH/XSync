@@ -101,6 +101,19 @@ public class XSyncRemoteService implements RemoteService {
     return gson.fromJson(jsonStr, Metadata.class);
   }
 
+  @Override
+  public Response delete(String path) {
+    Validations.require(StringUtils.isNotEmpty(path), "path cannot be empty");
+    return Unirest.delete("/metadata/delete")
+        .queryString("path", path)
+        .asObject(Response.class)
+        .ifFailure(
+            error -> {
+              throw new UnirestException("Delete file Failed");
+            })
+        .getBody();
+  }
+
   /**
    * Iterator for streaming chunks from a remote response. Implements AutoCloseable to ensure
    * resource cleanup.

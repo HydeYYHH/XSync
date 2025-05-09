@@ -17,4 +17,7 @@ public interface SyncService {
 
   /** core method */
   Boolean sync(File file);
+
+  /** Delete file from server */
+  Boolean delete(File file);
 }

@@ -1,7 +1,16 @@
 package com.hhst.xsync.service;
 
-public interface ObjectStorageService {
-  void putObject(String name, byte[] data) throws Exception;
 
-  byte[] getObject(String name) throws Exception;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+public interface ObjectStorageService {
+  CompletableFuture<Void> putObject(String name, byte[] data);
+
+  CompletableFuture<byte[]> getObject(String name);
+
+  CompletableFuture<Void> removeObject(String name);
+
+  CompletableFuture<Void> removeObjects(List<String> names);
+
 }
