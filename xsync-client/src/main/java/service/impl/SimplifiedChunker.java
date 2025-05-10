@@ -16,7 +16,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import utils.Const;
 
-public class OptimizedChunker {
+public class SimplifiedChunker {
 
   private Integer expectedChunkSize;
 
@@ -28,7 +28,7 @@ public class OptimizedChunker {
     return () -> new ChunkerIterator(stream, size, expectedChunkSize);
   }
 
-  public OptimizedChunker setExpectedChunkSize(final int expectedChunkSize) {
+  public SimplifiedChunker setExpectedChunkSize(final int expectedChunkSize) {
     this.expectedChunkSize = expectedChunkSize;
     return this;
   }
@@ -97,7 +97,7 @@ public class OptimizedChunker {
 
       final byte[] data = core.readNextChunk(stream, size, currentOffset);
 
-      final Chunk chunk = new Chunk(data, data.length);
+      final Chunk chunk = new Chunk(data);
 
       currentOffset += data.length;
       return chunk;

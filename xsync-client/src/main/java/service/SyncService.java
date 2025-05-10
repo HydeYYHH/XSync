@@ -15,6 +15,10 @@ public interface SyncService {
 
   SyncService authenticate() throws IOException;
 
+  SyncService setCompressed(Boolean enabled);
+
+  SyncService setEncrypted(Boolean enabled) throws IOException;
+
   /** core method */
   Boolean sync(File file);
 

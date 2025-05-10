@@ -20,7 +20,6 @@ import java.util.concurrent.CompletableFuture;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.coyote.BadRequestException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -105,7 +104,7 @@ public class ChunkController {
            */
           int index = meta.getChunkHashes().indexOf(chunkHash);
           if (index == -1) {
-            throw new BadRequestException("Invalid chunk: " + chunkHash);
+            return Response.build(HttpStatus.BAD_REQUEST, "Invalid chunk");
           }
           fcs.add(new Fc(null, null, chunkHash, index));
           // Upload it to minio server
