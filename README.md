@@ -7,6 +7,6 @@ Powered by FastCDC (content defined chunking), unirest (for request on client si
 
 ## TODOs
 
-- [ ] Data compress and encrypt
+- [x] Data compression and encryption
 
 - [ ] File system monitor and automatically sync files
